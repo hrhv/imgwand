@@ -1,0 +1,49 @@
+{
+  "name": "@hrhv/imgwand-cli",
+  "version": "0.1.0-alpha.1",
+  "description": "k9s-style terminal UI to inspect images, preview them in high quality, and strip EXIF/XMP/IPTC/ICC metadata and C2PA manifests",
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "bin": {
+    "imgwand": "dist/index.js"
+  },
+  "main": "./dist/index.js",
+  "files": [
+    "dist",
+    "LICENSE",
+    "README.md"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hrhv/imgwand.git",
+    "directory": "packages/cli"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  },
+  "scripts": {
+    "build": "tsup",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "exif",
+    "c2pa",
+    "metadata",
+    "tui",
+    "cli",
+    "kitty",
+    "sixel",
+    "iterm2",
+    "tmux"
+  ],
+  "author": "Harshit Budhraja",
+  "license": "MPL-2.0",
+  "dependencies": {
+    "@hrhv/imgwand": "0.1.0-alpha.1",
+    "commander": "^15.1.0",
+    "ink": "^8.0.0",
+    "react": "^19.3.1"
+  }
+}

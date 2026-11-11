@@ -1,0 +1,185 @@
+# Builds standalone imgwand binaries for every platform, smoke-tests each one on its own OS/CPU, and attaches them
+# to the GitHub release together with SHA256SUMS, install.sh and uninstall.sh.
+#
+# Release assets (what install.sh downloads):
+#   imgwand-{linux-x64,linux-arm64,linux-x64-musl,linux-arm64-musl,darwin-x64,darwin-arm64}.gz
+#   SHA256SUMS, install.sh, uninstall.sh
+#
+# Each binary embeds the native libraries for its platform (sharp/libvips and the C2PA SDK) and extracts them to a
+# per-user cache on first run. The C2PA SDK ships no musl build, so the musl binaries use one compiled here
+# (scripts/build-c2pa-musl.sh, without the TrustMark watermarking module).
+#
+# When an older tag is rebuilt with workflow_dispatch, the app comes from the tag and the release
+# tooling (scripts/, install.sh, uninstall.sh) from this workflow's commit.
+
+name: Release binaries
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing release tag to attach binaries to (leave empty to only build and test)"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+env:
+  BUN_VERSION: "1.3.14"
+  RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
+
+jobs:
+  c2pa-musl:
+    name: C2PA SDK for musl (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      matrix:
+        include:
+          - { arch: x64, runner: ubuntu-latest }
+          - { arch: arm64, runner: ubuntu-24.04-arm }
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.RELEASE_TAG || github.ref }}
+      - name: Read the C2PA SDK version
+        id: version
+        # A block scalar: the command contains ": ", which a plain YAML value cannot.
+        run: |
+          echo "version=$(sed -n 's/.*"@contentauth\/c2pa-node": "\([0-9.]*\)".*/\1/p' packages/core/package.json)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v4
+        id: cache
+        with:
+          path: .native/c2pa-musl
+          key: c2pa-musl-${{ matrix.arch }}-${{ steps.version.outputs.version }}-${{ hashFiles('scripts/build-c2pa-musl.sh') }}
+      # Built in an Alpine container started from the host: JavaScript actions cannot run inside Alpine
+      # job containers on arm64 runners, so the job itself stays on the runner.
+      - name: Build in Alpine
+        if: steps.cache.outputs.cache-hit != 'true'
+        env:
+          C2PA_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          docker run --rm -v "$PWD:/w" -w /w rust:alpine sh scripts/build-c2pa-musl.sh "$C2PA_VERSION" .native/c2pa-musl/index.node
+          sudo chown -R "$(id -u):$(id -g)" .native
+      - uses: actions/upload-artifact@v7
+        with:
+          name: c2pa-musl-${{ matrix.arch }}
+          path: .native/c2pa-musl/index.node
+          if-no-files-found: error
+
+  build:
+    name: build (${{ matrix.platform }})
+    needs: c2pa-musl
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { platform: linux-x64, runner: ubuntu-latest }
+          - { platform: linux-arm64, runner: ubuntu-24.04-arm }
+          - { platform: linux-x64-musl, runner: ubuntu-latest, alpine: true, musl: x64 }
+          - { platform: linux-arm64-musl, runner: ubuntu-24.04-arm, alpine: true, musl: arm64 }
+          - { platform: darwin-x64, runner: macos-15-intel }
+          - { platform: darwin-arm64, runner: macos-latest }
+    env:
+      TOOLING: .release-tooling
+    steps:
+      - name: Check out the release source
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ env.RELEASE_TAG || github.ref }}
+
+      - name: Check out the release tooling (this workflow's commit)
+        uses: actions/checkout@v7
+        with:
+          path: ${{ env.TOOLING }}
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: "npm"
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Check the tag matches package.json
+        if: env.RELEASE_TAG != ''
+        run: |
+          version="$(node -p 'require("./packages/cli/package.json").version')"
+          if [ "${RELEASE_TAG#v}" != "$version" ]; then
+            echo "::error::Release tag $RELEASE_TAG does not match package version $version"
+            exit 1
+          fi
+
+      - run: npm ci
+
+      - name: Download the musl C2PA SDK
+        if: matrix.musl
+        uses: actions/download-artifact@v8
+        with:
+          name: c2pa-musl-${{ matrix.musl }}
+          path: .native/c2pa-musl
+
+      - name: Build binary
+        env:
+          PLATFORM: ${{ matrix.platform }}
+          MUSL: ${{ matrix.musl }}
+        # --root: build the checked-out release source, not the tooling checkout the script lives in.
+        run: |
+          if [ -n "$MUSL" ]; then
+            npx tsx "$TOOLING/scripts/build-binaries.ts" "$PLATFORM" --gzip --root "$GITHUB_WORKSPACE" --c2pa-node .native/c2pa-musl/index.node
+          else
+            npx tsx "$TOOLING/scripts/build-binaries.ts" "$PLATFORM" --gzip --root "$GITHUB_WORKSPACE"
+          fi
+
+      - name: Smoke test (native)
+        if: ${{ !matrix.alpine }}
+        run: sh "$TOOLING/scripts/smoke-test.sh" dist/bin/imgwand-${{ matrix.platform }}
+
+      - name: Smoke test (Alpine, musl)
+        if: ${{ matrix.alpine }}
+        run: |
+          docker run --rm -v "$PWD:/w" -w /w alpine:3.22 sh -c \
+            "apk add --no-cache libstdc++ libgcc >/dev/null && sh $TOOLING/scripts/smoke-test.sh dist/bin/imgwand-${{ matrix.platform }}"
+
+      - name: Verify macOS code signature
+        if: startsWith(matrix.platform, 'darwin-')
+        run: codesign --verify --strict --verbose dist/bin/imgwand-${{ matrix.platform }}
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: binary-${{ matrix.platform }}
+          path: dist/bin/imgwand-${{ matrix.platform }}.gz
+          if-no-files-found: error
+
+  publish:
+    name: attach to release
+    needs: build
+    if: github.event_name == 'release' || inputs.tag != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      # install.sh and uninstall.sh are release tooling: take them from this workflow's commit (see top).
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: binary-*
+          merge-multiple: true
+          path: release
+
+      - name: Add installer, notices and checksums
+        run: |
+          cp install.sh uninstall.sh LICENSE THIRD_PARTY_NOTICES.md release/
+          cd release
+          sha256sum imgwand-*.gz install.sh uninstall.sh > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Upload release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$RELEASE_TAG" release/* --clobber --repo "$GITHUB_REPOSITORY"

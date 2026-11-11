@@ -1,0 +1,98 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: test (${{ matrix.os }}, node ${{ matrix.node-version }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        node-version: ["24", "26"]
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: "npm"
+
+      - name: Install ExifTool (independent reader the tests cross-check against)
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then sudo apt-get update -q && sudo apt-get install -y -q libimage-exiftool-perl; else brew install exiftool; fi
+
+      - run: npm ci
+      - run: npm run typecheck
+      - name: Test with coverage
+        run: npm run coverage
+      - run: npm run build
+      - name: Smoke test the npm bundle
+        run: npm run smoke
+      - name: Check dependency licenses
+        run: npm run licenses
+
+      - name: The packages install and import cleanly from their tarballs
+        if: matrix.os == 'ubuntu-latest' && matrix.node-version == '24'
+        run: |
+          mkdir -p "$RUNNER_TEMP/packs" "$RUNNER_TEMP/consumer"
+          npm pack --workspace @hrhv/imgwand --workspace @hrhv/imgwand-cli --pack-destination "$RUNNER_TEMP/packs"
+          cd "$RUNNER_TEMP/consumer"
+          # c2pa-node's install script downloads the SDK binary for this platform; npm 11 runs only approved scripts.
+          echo '{"name":"consumer","private":true,"allowScripts":{"@contentauth/c2pa-node":true}}' > package.json
+          npm install "$RUNNER_TEMP"/packs/*.tgz
+          node --input-type=module -e "const m = await import('@hrhv/imgwand'); if (typeof m.editMetadata !== 'function') process.exit(1); console.log(Object.keys(m).length, 'exports')"
+          npx imgwand --version
+
+      - uses: actions/upload-artifact@v7
+        if: matrix.os == 'ubuntu-latest' && matrix.node-version == '24'
+        with:
+          name: coverage
+          path: coverage/
+          if-no-files-found: ignore
+
+  binary:
+    name: binary + installer (linux-x64)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: "npm"
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.14"
+
+      - run: npm ci
+
+      - name: Lint shell scripts
+        run: shellcheck -s sh install.sh uninstall.sh scripts/smoke-test.sh scripts/build-c2pa-musl.sh scripts/install-local.sh scripts/uninstall-local.sh
+
+      - name: Build the linux-x64 binary
+        run: npx tsx scripts/build-binaries.ts linux-x64 --gzip
+
+      - name: Smoke test the binary (fresh HOME, extracts its native libraries)
+        run: sh scripts/smoke-test.sh dist/bin/imgwand-linux-x64
+
+      - name: Install it with install.sh from a local "release"
+        run: |
+          mkdir release && cp dist/bin/imgwand-linux-x64.gz release/
+          (cd release && sha256sum -- *.gz > SHA256SUMS)
+          IMGWAND_DOWNLOAD_URL="file://$PWD/release" IMGWAND_INSTALL_DIR="$RUNNER_TEMP/bin" sh install.sh
+          "$RUNNER_TEMP/bin/imgwand" --version
+
+      - name: Remove it with uninstall.sh
+        run: |
+          IMGWAND_INSTALL_DIR="$RUNNER_TEMP/bin" sh uninstall.sh
+          test ! -e "$RUNNER_TEMP/bin/imgwand"

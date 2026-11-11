@@ -1,0 +1,55 @@
+{
+  "name": "@hrhv/imgwand",
+  "version": "0.1.0-alpha.1",
+  "description": "Read, edit and losslessly remove image metadata (EXIF, XMP, IPTC, ICC, comments) and C2PA manifests: read, verify, sign, redact and strip",
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "LICENSE",
+    "README.md"
+  ],
+  "sideEffects": false,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hrhv/imgwand.git",
+    "directory": "packages/core"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  },
+  "scripts": {
+    "build": "tsup && tsc -p tsconfig.build.json",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "exif",
+    "xmp",
+    "iptc",
+    "icc",
+    "c2pa",
+    "content-credentials",
+    "metadata",
+    "image",
+    "privacy",
+    "sharp"
+  ],
+  "author": "Harshit Budhraja",
+  "license": "MPL-2.0",
+  "dependencies": {
+    "@contentauth/c2pa-node": "0.10.1",
+    "@xmldom/xmldom": "^0.9.12",
+    "sharp": "^0.35.5"
+  }
+}

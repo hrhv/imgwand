@@ -1,0 +1,5 @@
+# Toolchain for developing imgwand. Node 24 is the oldest supported runtime, so developing on it keeps newer
+# APIs from slipping in; CI also tests Node 26. Bun is only used to compile the standalone binaries.
+[tools]
+node = "24"
+bun = "1.3.14"
