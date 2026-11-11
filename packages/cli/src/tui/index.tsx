@@ -61,7 +61,16 @@ export async function launchTui(options: TuiOptions): Promise<number> {
   const overlay = new ImageOverlay((data) => process.stdout.write(data));
   const app = render(
     <App startDir={startDir} startFile={startFile} capabilities={options.capabilities} config={options.config} version={VERSION} deps={defaultDeps({ ...options, cwd: options.cwd, overlay })} />,
-    { alternateScreen: true, exitOnCtrlC: false, patchConsole: true, stdout: overlayStdout(process.stdout, overlay), onRender: () => overlay.afterRender() },
+    {
+      alternateScreen: true,
+      exitOnCtrlC: false,
+      patchConsole: true,
+      stdout: overlayStdout(process.stdout, overlay),
+      onRender: () => overlay.afterRender(),
+      // Ink turns itself non-interactive (no live redraws) when the CI variable is set, e.g. in dev containers.
+      // The UI only starts on a terminal, so a terminal decides.
+      interactive: Boolean(process.stdout.isTTY),
+    },
   );
   try {
     await app.waitUntilExit();

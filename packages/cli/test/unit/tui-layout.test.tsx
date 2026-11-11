@@ -252,6 +252,7 @@ describe("side panel in the app", () => {
       stdout: overlayStdout(term as unknown as NodeJS.WriteStream, overlay),
       stdin: keyboard as unknown as NodeJS.ReadStream,
       onRender: () => overlay.afterRender(),
+      interactive: true, // as the app does (CI=true would otherwise make Ink non-interactive)
       patchConsole: false,
       exitOnCtrlC: false,
     });
