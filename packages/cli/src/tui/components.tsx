@@ -202,6 +202,8 @@ export interface DialogChoice {
   readonly label: string;
 }
 
+const BUTTON_HINT = "enter: choose · tab/←/→: switch · esc: cancel";
+
 export interface DialogInput {
   readonly label: string;
   readonly value: string;
@@ -230,7 +232,11 @@ export function Dialog({
 }) {
   const title = sanitize(rawTitle);
   const lines = rawLines.map(sanitize);
-  const w = Math.min(width - 4, Math.max(50, ...lines.map((l) => l.length + 6), title.length + 8, input ? input.value.length + input.label.length + 10 : 0));
+  // Wide enough for every line it shows, the error included (it would otherwise wrap and push the buttons down).
+  const w = Math.min(
+    width - 4,
+    Math.max(50, ...lines.map((l) => l.length + 6), title.length + 8, input ? input.value.length + input.label.length + 10 : 0, error ? sanitize(error).length + 6 : 0, focus !== undefined ? BUTTON_HINT.length + 6 : 0),
+  );
   if (focus !== undefined) {
     return (
       <Box flexDirection="column" borderStyle="double" borderColor={THEME.title} width={w} paddingX={1} alignSelf="center">
@@ -258,7 +264,7 @@ export function Dialog({
             </Text>
           ))}
         </Box>
-        <Text color={THEME.dim}>{"enter: choose · tab/←/→: switch · esc: cancel"}</Text>
+        <Text color={THEME.dim}>{BUTTON_HINT}</Text>
       </Box>
     );
   }
