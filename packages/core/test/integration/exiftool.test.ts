@@ -11,6 +11,8 @@ import { fullJpeg, fullPng, fullWebp, testSigner } from "../helpers/fixtures.js"
  * suite is skipped when it is missing.
  */
 const hasExiftool = spawnSync("exiftool", ["-ver"]).status === 0;
+// CI sets this, so a broken ExifTool install fails the build instead of silently skipping the cross-checks.
+if (!hasExiftool && process.env.IMGWAND_REQUIRE_EXIFTOOL) throw new Error("ExifTool is required (IMGWAND_REQUIRE_EXIFTOOL) but `exiftool -ver` failed");
 const dir = mkdtempSync(join(tmpdir(), "imgwand-exiftool-"));
 let counter = 0;
 

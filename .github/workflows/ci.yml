@@ -26,14 +26,23 @@ jobs:
           node-version: ${{ matrix.node-version }}
           cache: "npm"
 
+      # ExifTool is pure Perl (preinstalled on every runner): fetched from its GitHub repository at a pinned release
+      # commit, so the job does not depend on apt or Homebrew mirrors (a DNS failure on Ubuntu's once broke CI).
       - name: Install ExifTool (independent reader the tests cross-check against)
+        env:
+          EXIFTOOL_COMMIT: 1da714924f67763b6a8a7013dd2aa1983a16f87b # 13.63
         run: |
-          if [ "$RUNNER_OS" = "Linux" ]; then sudo apt-get update -q && sudo apt-get install -y -q libimage-exiftool-perl; else brew install exiftool; fi
+          mkdir -p "$RUNNER_TEMP/exiftool"
+          curl -fsSL --proto '=https' --retry 5 --retry-all-errors "https://github.com/exiftool/exiftool/archive/$EXIFTOOL_COMMIT.tar.gz" | tar -xz -C "$RUNNER_TEMP/exiftool" --strip-components=1
+          echo "$RUNNER_TEMP/exiftool" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/exiftool/exiftool" -ver
 
       - run: npm ci
       - run: npm run typecheck
       - name: Test with coverage
         run: npm run coverage
+        env:
+          IMGWAND_REQUIRE_EXIFTOOL: "1" # fail instead of skipping the cross-checks
       - run: npm run build
       - name: Smoke test the npm bundle
         run: npm run smoke
